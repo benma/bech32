@@ -19,7 +19,7 @@ import Data.Char (toLower, toUpper)
 import Data.Digits
 import Data.Foldable (foldl')
 import Data.Ix (Ix(..))
-import Data.Word (Word8, Word32)
+import Data.Word (Word8)
 
 type HRP = BS.ByteString
 type Data = [Word8]
@@ -57,7 +57,7 @@ charsetMap c | inRange (Arr.bounds inv) upperC = inv Arr.! upperC
     inv = Arr.listArray ('0', 'Z') (repeat Nothing) Arr.// (map swap (Arr.assocs charset))
     swap (a, b) = (toUpper b, Just a)
 
-bech32Polymod :: [Word5] -> Word32
+bech32Polymod :: [Word5] -> Word
 bech32Polymod values = foldl' go 1 values .&. 0x3fffffff
   where
     go chk value = foldl' xor chk' [g | (g, i) <- zip generator [25..], testBit chk i]
