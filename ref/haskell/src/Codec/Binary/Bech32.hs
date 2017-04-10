@@ -12,13 +12,13 @@ module Codec.Binary.Bech32
 
 import Control.Monad (guard)
 import qualified Data.Array as Arr
-import Data.Bits (Bits, unsafeShiftL, unsafeShiftR, (.&.), xor, testBit)
+import Data.Bits (Bits, unsafeShiftL, unsafeShiftR, (.&.), (.|.), xor, testBit)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import Data.Char (toLower, toUpper)
-import Data.Digits
 import Data.Foldable (foldl')
 import Data.Ix (Ix(..))
+import Data.Maybe (fromJust)
 import Data.Word (Word8)
 
 type HRP = BS.ByteString
@@ -97,30 +97,32 @@ bech32Decode bech32 = do
     guard $ bech32VerifyChecksum hrp' dat'
     return (hrp', take (BS.length dat - 6) dat')
 
-toBase32 :: [Word8] -> [Word5]
-toBase32 dat = pad ++ result
+convertBits :: [Word] -> Int -> Int -> Bool -> Maybe [Word]
+convertBits dat frombits tobits pad = fmap (concat . reverse) $ go dat 0 0 []
   where
-    (numGroups, m) = (length dat * 8) `quotRem` 5
-    -- round up if there is an incomplete group
-    expectedLen = if m == 0 then numGroups else numGroups + 1
-    n = unDigits (256 :: Integer) $ map fromIntegral dat
-    -- pad zeroes at the end so that number of bits is divisible by 5.
-    n' = n .<<. ((-m) `mod` 5)
-    result = map (UnsafeWord5 . fromIntegral) $ digits 32 n'
-    -- preserve zeroes at the beginning
-    pad = replicate (expectedLen - length result) (UnsafeWord5 0)
+    go :: [Word] -> Word -> Int -> [[Word]] -> Maybe [[Word]]
+    go [] acc bits result = do
+        let padValue = (acc .<<. (tobits - bits)) .&. maxv
+        if pad
+        then if bits /= 0
+             then return $ [padValue] : result
+             else return result
+        else do
+            guard $ bits < frombits && padValue == 0
+            return result
+    go (value:dat') acc bits result = go dat' acc' (bits' `rem` tobits) (result':result)
+      where
+        acc' = (acc .<<. frombits) .|. fromIntegral value
+        bits' = bits + frombits
+        result' = [(acc' .>>. b) .&. maxv | b <- [bits'-tobits,bits'-2*tobits..0]]
+    maxv = (1 .<<. tobits) - 1
+{-# INLINE convertBits #-}
+
+toBase32 :: [Word8] -> [Word5]
+toBase32 dat = map word5 $ fromJust $ convertBits (map fromIntegral dat) 8 5 True
 
 toBase256 :: [Word5] -> Maybe [Word8]
-toBase256 dat = do
-    -- incomplete last group must be <=4 bits and all zeroes
-    guard $ m <= 4 && n .&. ((1 .<<. m) - 1) == 0
-    return $ pad ++ result
-  where
-    (expectedLen, m) = (length dat * 5) `quotRem` 8
-    n = unDigits (32 :: Integer) $ map fromWord5 dat
-    result = map fromIntegral $ digits 256 (n .>>. m)
-    -- preserve zeroes at the beginning
-    pad = replicate (expectedLen - length result) 0
+toBase256 dat = fmap (map fromIntegral) $ convertBits (map fromWord5 dat) 5 8 False
 
 segwitDecode :: HRP -> BS.ByteString -> Maybe (Word8, Data)
 segwitDecode hrp addr = do
