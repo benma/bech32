@@ -84,10 +84,15 @@ tests = testGroup "Tests"
     , testCase "Invalid Addresses" $ forM_ invalidAddresses $ \address -> do
           assertBool (show address) (isNothing $ segwitDecode (BSC.pack "bc") address)
           assertBool (show address) (isNothing $ segwitDecode (BSC.pack "tb") address)
-    , testCase "Invalid Encoding" $ do
+          assertBool (show address) (isNothing $ segwitDecode (BSC.pack "") (BSC.drop 2 address))
+    , testCase "More Encoding/Decoding Cases" $ do
           assertBool "length > 90" $ isNothing $
               bech32Encode (BSC.pack "bc") (replicate 82 (word5 (1::Word8)))
           assertBool "segwit version bounds" $ isNothing $
               segwitEncode (BSC.pack "bc") 17 []
-
+          assertBool "empty HRP encode" $ isNothing $ bech32Encode (BSC.pack "") []
+          assertBool "empty HRP decode" $ isNothing $ bech32Decode (BSC.pack "10a06t8")
+          assertEqual "hrp lowercased"
+              (Just $ BSC.pack "hrp1g9xj8m")
+              (bech32Encode (BSC.pack "HRP") [])
     ]

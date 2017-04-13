@@ -79,11 +79,15 @@ bech32VerifyChecksum hrp dat = bech32Polymod (bech32HRPExpand hrp ++ dat) == 1
 
 bech32Encode :: HRP -> [Word5] -> Maybe BS.ByteString
 bech32Encode hrp dat = do
+    guard $ checkHRP hrp
     let dat' = dat ++ bech32CreateChecksum hrp dat
         rest = map (charset Arr.!) dat'
-        result = BSC.concat [hrp, BSC.pack "1", BSC.pack rest]
+        result = BSC.concat [BSC.map toLower hrp, BSC.pack "1", BSC.pack rest]
     guard $ BS.length result <= 90
     return result
+
+checkHRP :: BS.ByteString -> Bool
+checkHRP hrp = not (BS.null hrp) && BS.all (\char -> char >= 33 && char <= 126) hrp
 
 bech32Decode :: BS.ByteString -> Maybe (HRP, [Word5])
 bech32Decode bech32 = do
@@ -92,7 +96,7 @@ bech32Decode bech32 = do
     let (hrp, dat) = BSC.breakEnd (== '1') $ BSC.map toLower bech32
     guard $ BS.length dat >= 6
     hrp' <- BSC.stripSuffix (BSC.pack "1") hrp
-    guard $ BS.all (\char -> char >= 33 && char <= 126) hrp'
+    guard $ checkHRP hrp'
     dat' <- mapM charsetMap $ BSC.unpack dat
     guard $ bech32VerifyChecksum hrp' dat'
     return (hrp', take (BS.length dat - 6) dat')
