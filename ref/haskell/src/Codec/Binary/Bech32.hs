@@ -11,6 +11,7 @@ module Codec.Binary.Bech32
   ) where
 
 import Control.Monad (guard)
+import Control.Monad.Identity (Identity, runIdentity)
 import qualified Data.Array as Arr
 import Data.Bits (Bits, unsafeShiftL, unsafeShiftR, (.&.), (.|.), xor, testBit)
 import qualified Data.ByteString as BS
@@ -18,7 +19,6 @@ import qualified Data.ByteString.Char8 as BSC
 import Data.Char (toLower, toUpper)
 import Data.Foldable (foldl')
 import Data.Ix (Ix(..))
-import Data.Maybe (fromJust)
 import Data.Word (Word8)
 
 type HRP = BS.ByteString
@@ -101,19 +101,28 @@ bech32Decode bech32 = do
     guard $ bech32VerifyChecksum hrp' dat'
     return (hrp', take (BS.length dat - 6) dat')
 
-convertBits :: [Word] -> Int -> Int -> Bool -> Maybe [Word]
+type Pad f = Int -> Int -> Word -> [[Word]] -> f [[Word]]
+
+yesPadding :: Pad Identity
+yesPadding _ 0 _ result = return result
+yesPadding _ _ padValue result = return $ [padValue] : result
+{-# INLINE yesPadding #-}
+
+noPadding :: Pad Maybe
+noPadding frombits bits padValue result = do
+    guard $ bits < frombits && padValue == 0
+    return result
+{-# INLINE noPadding #-}
+
+-- Big endian converion of a bytestring from base 2^frombits to base 2^tobits.
+-- frombits and twobits must be positive and 2^frombits and 2^tobits must be smaller than the size of Word.
+-- Every value in dat must be strictly smaller than 2^frombits.
+convertBits :: Functor f => [Word] -> Int -> Int -> Pad f -> f [Word]
 convertBits dat frombits tobits pad = fmap (concat . reverse) $ go dat 0 0 []
   where
-    go :: [Word] -> Word -> Int -> [[Word]] -> Maybe [[Word]]
-    go [] acc bits result = do
+    go [] acc bits result =
         let padValue = (acc .<<. (tobits - bits)) .&. maxv
-        if pad
-        then if bits /= 0
-             then return $ [padValue] : result
-             else return result
-        else do
-            guard $ bits < frombits && padValue == 0
-            return result
+        in pad frombits bits padValue result
     go (value:dat') acc bits result = go dat' acc' (bits' `rem` tobits) (result':result)
       where
         acc' = (acc .<<. frombits) .|. fromIntegral value
@@ -123,10 +132,10 @@ convertBits dat frombits tobits pad = fmap (concat . reverse) $ go dat 0 0 []
 {-# INLINE convertBits #-}
 
 toBase32 :: [Word8] -> [Word5]
-toBase32 dat = map word5 $ fromJust $ convertBits (map fromIntegral dat) 8 5 True
+toBase32 dat = map word5 $ runIdentity $ convertBits (map fromIntegral dat) 8 5 yesPadding
 
 toBase256 :: [Word5] -> Maybe [Word8]
-toBase256 dat = fmap (map fromIntegral) $ convertBits (map fromWord5 dat) 5 8 False
+toBase256 dat = fmap (map fromIntegral) $ convertBits (map fromWord5 dat) 5 8 noPadding
 
 segwitDecode :: HRP -> BS.ByteString -> Maybe (Word8, Data)
 segwitDecode hrp addr = do
